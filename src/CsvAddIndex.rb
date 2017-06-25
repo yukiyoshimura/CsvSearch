@@ -1,14 +1,17 @@
 require 'csv'
 
 class CsvAddIndex
-  input_file = "./test.csv"
+  input_file = "./ken_all.csv"
   tmp_file = "./tmp.csv"
   result_file = "./indexd_zip.csv"
   
-  # 引数:文字列オーバーで2分割された住所レコードの配列
-  # 戻り値:マージ後の住所レコード
+  # 概要
+  # 分割されているレコードを1レコードにする
+  # 配列の1要素名に対して2要素目を結合する
+  #   引数:文字列オーバーで2分割された住所レコードの配列
+  #   戻り値:マージ後の住所レコード
   def self.merge_split_data(merge_list)
-    if (merge_list[0][0].to_i < merge_list[1][0].to_i)
+    if merge_list[0][0].to_i < merge_list[1][0].to_i
       merged_row = [
                     merge_list[0][0],
                     merge_list[0][1],
@@ -32,12 +35,25 @@ class CsvAddIndex
     return merged_row
   end
   
-  # 引数:csv出力したい配列 出力したいファイル名
-  # 戻り値:なし
-  def self.out_result_csv(result_array,out_file)
+  # 概要
+  # 配列に対して行番号と都道府県個数をセットして、csv出力する
+  #   引数:csv出力したい配列 出力したいファイル名　都道府県名だけを格納した配列
+  #   戻り値:なし
+  def self.out_result_csv(result_array,out_file,pref_all)
+    # 県コード 市区町村コード 郵便番号 でソート
+    result_array = result_array.sort_by{|elem| (elem[1].to_s + elem[3].to_s + elem[4].to_s).to_i;}
+    pref_cnt = 0
+    tmp_str = ""
     CSV.open(out_file,"w") do |csv|
-      result_array.each do |row|
-        puts row[0]
+      result_array.each_with_index do |row, rowid|
+        pref_cd = row[1]
+        pref_kanji = row[5]
+        unless tmp_str == pref_kanji      
+          tmp_str = pref_kanji
+          pref_cnt = pref_all.count {|pref| pref ==  pref_cd}
+        end
+        row[0] = rowid + 1
+        row[2] = pref_cnt       
         csv << row
       end
     end
@@ -55,13 +71,13 @@ class CsvAddIndex
   # 8:町域名 kanji
   puts "============Start CsvAddIndex============"
   puts "reading csv....."
-  csv_data = CSV.read(input_file, headers: false)
   headers = [
              "row_id",
-             "prefecture_cd",
+             "pref_cd",
+             "pref_num",
              "town_cd",
              "new_post_cd",
-             "prefecture_kanji",
+             "pref_kanji",
              "city_kanji",
              "town_kanji",
              "merge_key"
@@ -71,23 +87,25 @@ class CsvAddIndex
     csv << headers
     CSV.foreach(input_file) do |data|
       row_id = $.
-      prefecture_cd = data[0][0,2]
+      pref_cd = data[0][0,2]
+      pref_num = ""
       town_cd = data[0][2,3]
       new_post_cd = data[2]
-      prefecuture_kana = data[3]
+      pref_kana = data[3]
       city_kana = data[4]
       town_kana = data[5]
-      prefecture_kanji = data[6]
+      pref_kanji = data[6]
       city_kanji = data[7]
-      town_kanji = data[8]
-      merge_key = new_post_cd + prefecuture_kana + city_kana + town_kana
+      town_kanji = data[8].gsub("以下に掲載がない場合","")
+      merge_key = new_post_cd + pref_kana + city_kana + town_kana
       
       csv << [
               row_id,
-              prefecture_cd,
+              pref_cd,
+              pref_num,
               town_cd,
               new_post_cd,
-              prefecture_kanji,
+              pref_kanji,
               city_kanji,
               town_kanji,
               merge_key
@@ -96,19 +114,18 @@ class CsvAddIndex
   end
 
   # 結合対象レコードのキー取得 郵便番号と町域名カナで重複するもの
-  table = CSV.table(tmp_file)
+  table = CSV.table(tmp_file, {:converters => nil})
   target_list = table[:merge_key].group_by{|i| i}.reject{|key,value| value.one?}.keys
-    
-  #分割レコードの抽出
-  #分割されていないレコードを配列へ格納
-  puts "creat array of merged record"
+
+  # 分割レコードの抽出　および分割されていないレコードを配列へ格納
+  puts "editing split record..."
   unmerged_list  = []
-  result_array = []
+  result_array = []  
   table.each do |data|
     merge_flg = false;
     # 分割されているレコード
     target_list.each do |str|
-      if (data[:merge_key] == str)
+      if data[:merge_key] == str
         merge_flg = true
         unmerged_list.push(data)
       end
@@ -125,9 +142,9 @@ class CsvAddIndex
   merged_list =[]
   target_list.each do |str|
     split_list = []
-    #merge対象を配列に格納
+    # merge対象を配列に格納
     unmerged_list.each do |row|
-      if (row[7] == str)
+      if row[8] == str
         split_list.push(row)
       end 
     end
@@ -136,10 +153,15 @@ class CsvAddIndex
     merged_row = merge_split_data(split_list)
     merged_list.push(merged_row) 
   end
-  
+
   result_array.concat(merged_list)
-  puts "create indexd_zip.csv"
-  out_result_csv(result_array,result_file)
+  puts "creating indexd_zip.csv..."
+  pref_all = []
+  result_array.each do |data|
+    pref_all.push(data[1])
+  end
   
-puts "============End CsvAddIndex============"
+  out_result_csv(result_array,result_file,pref_all)
+  puts "============End CsvAddIndex============"
+
 end
